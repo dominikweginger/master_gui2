@@ -1,24 +1,16 @@
 {
-    "buttons": [
-        {
-            "id": "btn1",
-            "label": "Run Script",
-            "action": "SCRIPT",
-            "payload": "scripts/example.py",
-            "icon": "assets/icons/script.png",
-            "size": [
-                64,
-                64
-            ],
-            "position": [
-                0,
-                0
-            ],
-            "page": 1
-        }
-    ],
-    "theme": {
-        "stylesheet": "test.qss",
-        "background": "assets/backgrounds/default.png"
-    }
+  "buttons": [
+    { "id": "m1", "label": "Script A",  "action": "SCRIPT", "payload": "scripts/a.py",          "icon": "assets/icons/script.png", "parent": null },
+    { "id": "m2", "label": "Tools",     "action": "MENU",                                        "icon": "assets/icons/tools.png",  "parent": null },
+    { "id": "m3", "label": "Link B",    "action": "LINK",  "payload": "https://example.com",    "icon": "assets/icons/link.png",   "parent": null },
+
+    { "id": "c21",  "label": "Analyse",      "action": "SCRIPT", "payload": "scripts/analyse.py", "icon": "assets/icons/script.png", "parent": "m2" },
+    { "id": "c22",  "label": "Reports",      "action": "MENU",                                     "icon": "assets/icons/folder.png", "parent": "m2" },
+
+    { "id": "c221", "label": "PDF-Report",   "action": "SCRIPT", "payload": "scripts/report.py",   "icon": "assets/icons/script.png", "parent": "c22" }
+  ],
+  "theme": {
+    "stylesheet": "assets/styles/default.qss",
+    "background": "assets/backgrounds/default.png"
+  }
 }

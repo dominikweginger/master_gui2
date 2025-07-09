@@ -1,166 +1,227 @@
 #!/usr/bin/env python3
-# ui/master_window.py
+"""
+GUI-Hauptfenster – Version 2025-07-09
+* 5×6-Raster (30 Buttons) pro Seite
+* beliebige Hierarchietiefe über parent-Feld
+* Breadcrumb mit  🏠  und  ⬅  Buttons
+"""
 
-import sys
-import subprocess
+import sys, subprocess
+from collections import defaultdict
 from pathlib import Path
+from typing import Tuple, List, Dict
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QStackedWidget,
-    QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QGridLayout, QMessageBox
+    QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QGridLayout, QMessageBox, QFrame
 )
 from PySide6.QtGui import QIcon, QDesktopServices
 from PySide6.QtCore import QUrl
 
+GRID_ROWS, GRID_COLS = 5, 6
+MAX_PER_PAGE = GRID_ROWS * GRID_COLS
+
 
 class MasterWindow(QMainWindow):
-    """
-    Hauptfenster der Anwendung mit dynamischem Laden & Rendering der Buttons
-    basierend auf der config["buttons"].
-    """
-
+    # ----------------------------------------------------------
+    # Initialisierung
+    # ----------------------------------------------------------
     def __init__(self, config: dict):
         super().__init__()
-        self.config = config
+        self.cfg_buttons: List[dict] = config["buttons"]
 
-        # ——————————————
-        # 1) Seiten-Container & GridLayouts anlegen
-        # ——————————————
-        max_page = max(b["page"] for b in self.config["buttons"])
-        self.pages = QStackedWidget()
-        self.page_layouts: dict[int, QGridLayout] = {}
+        # --- Baum aufbauen ---------------------------------------------------
+        self.children: Dict[str | None, List[dict]] = defaultdict(list)
+        for b in self.cfg_buttons:
+            self.children[b["parent"]].append(b)
 
-        for page_idx in range(1, max_page + 1):
-            container = QWidget()
-            grid = QGridLayout(container)
-            self.pages.addWidget(container)
-            self.page_layouts[page_idx] = grid
+        # --- Widgets ---------------------------------------------------------
+        self.pages          = QStackedWidget()
+        self.page_for_id    = {}      # parent-ID  → erste Seite seiner Children
+        self.nav_stack      = []      # Verlauf von parent-IDs (für Breadcrumb)
 
-        # ——————————————
-        # Zentrales Widget & Layout
-        # ——————————————
-        central = QWidget()
+        self._build_pages()           # alle Seiten erzeugen
+
+        central     = QWidget()
         main_layout = QVBoxLayout(central)
         main_layout.addWidget(self.pages)
 
-        # ——————————————
-        # Paginierungsleiste
-        # ——————————————
-        pagination_layout = QHBoxLayout()
+        # -------- Breadcrumb -------------------------------------------------
+        bc_frame = QFrame()
+        bc_frame.setFrameShape(QFrame.StyledPanel)
+        self.bc_layout = QHBoxLayout(bc_frame)
+
+        self.btn_home = QPushButton("🏠 Startseite")
+        self.btn_up   = QPushButton("⬅ Zurück")
+        self.btn_home.clicked.connect(self._go_home)
+        self.btn_up.clicked.connect(self._go_up)
+        self.bc_layout.addWidget(self.btn_home)
+        self.bc_layout.addWidget(self.btn_up)
+
+        main_layout.insertWidget(1, bc_frame)
+
+        # -------- Pagination -------------------------------------------------
         self.prev_btn = QPushButton("← Vor")
-        self.page_label = QLabel(self._label_text())
         self.next_btn = QPushButton("Nächste →")
-        pagination_layout.addWidget(self.prev_btn)
-        pagination_layout.addWidget(self.page_label)
-        pagination_layout.addWidget(self.next_btn)
-        main_layout.addLayout(pagination_layout)
+        self.page_lbl = QLabel("")
+        pagel = QHBoxLayout()
+        pagel.addWidget(self.prev_btn)
+        pagel.addWidget(self.page_lbl)
+        pagel.addWidget(self.next_btn)
+        main_layout.addLayout(pagel)
+
+        self.prev_btn.clicked.connect(self._go_prev)
+        self.next_btn.clicked.connect(self._go_next)
+        self.pages.currentChanged.connect(self._page_changed)
 
         self.setCentralWidget(central)
+        self._update_breadcrumb()
+        self._update_pagination()
 
-        # ——————————————
-        # Signale verbinden
-        # ——————————————
-        self.prev_btn.clicked.connect(self.go_previous)
-        self.next_btn.clicked.connect(self.go_next)
-        self.pages.currentChanged.connect(self.on_page_changed)
+    # ----------------------------------------------------------
+    # Seitenerzeugung
+    # ----------------------------------------------------------
+    def _new_grid_page(self) -> Tuple[QWidget, QGridLayout]:
+        container = QWidget()
+        grid = QGridLayout(container)
+        self.pages.addWidget(container)
+        return container, grid
 
-        # ——————————————
-        # 2) Buttons aus Config laden
-        # ——————————————
-        self.load_buttons()
-        self.update_buttons()
+    def _add_cfg_button(self, grid: QGridLayout, cfg: dict):
+        row, col = divmod(grid.count(), GRID_COLS)
+        btn = QPushButton(cfg["label"])
+        if icon := cfg.get("icon"):
+            btn.setIcon(QIcon(icon))
+        btn.clicked.connect(lambda _=None, b=cfg: self._on_button_click(b))
+        grid.addWidget(btn, row, col)
 
-    def load_buttons(self):
-        """
-        Liest self.config["buttons"] und platziert für jede Konfiguration
-        einen QPushButton im entsprechenden GridLayout.
-        """
-        for btn_cfg in self.config["buttons"]:
-            page = btn_cfg["page"]
-            row, col = btn_cfg["position"]
+    def _paginate_buttons(self, buttons: List[dict]) -> List[QWidget]:
+        pages: List[QWidget] = []
+        container, grid = self._new_grid_page()
+        pages.append(container)
 
-            btn = QPushButton(btn_cfg["label"])
-            if icon_path := btn_cfg.get("icon"):
-                btn.setIcon(QIcon(icon_path))
-            btn.setToolTip(btn_cfg.get("tooltip", btn_cfg["label"]))
-            btn.clicked.connect(lambda _, c=btn_cfg: self.handle_button_click(c))
+        for cfg in buttons:
+            if grid.count() >= MAX_PER_PAGE:
+                container, grid = self._new_grid_page()
+                pages.append(container)
+            self._add_cfg_button(grid, cfg)
 
-            self.page_layouts[page].addWidget(btn, row, col)
+        return pages  # Liste der Container-Widgets
 
-    def handle_button_click(self, btn_cfg: dict):
-        """
-        Dispatcher für Button-Aktionen anhand von btn_cfg["action"].
-        Unterstützte Aktionen: SCRIPT, LINK, EXPLORER, FILE, GROUP.
-        """
-        action = btn_cfg.get("action", "").upper()
-        payload = btn_cfg.get("payload", "")
+    def _build_pages(self):
+        # 1) Root-Seiten (parent = None)
+        root_pages = self._paginate_buttons(self.children[None])
+
+        # 2) Child-Seiten für jeden MENU-Knopf
+        for parent_cfg in self.children[None]:
+            if parent_cfg["action"] != "MENU":
+                continue
+            pages = self._paginate_buttons(self.children[parent_cfg["id"]])
+            if pages:
+                self.page_for_id[parent_cfg["id"]] = self.pages.indexOf(pages[0])
+
+        # 3) Rekursion für tiefere Ebenen
+        stack = list(self.children[None])  # shallow copy
+        while stack:
+            parent = stack.pop()
+            childs = self.children[parent["id"]]
+            for c in childs:
+                if c["action"] == "MENU":
+                    pages = self._paginate_buttons(self.children[c["id"]])
+                    if pages:
+                        self.page_for_id[c["id"]] = self.pages.indexOf(pages[0])
+                    stack.append(c)
+
+    # ----------------------------------------------------------
+    # Breadcrumb
+    # ----------------------------------------------------------
+    def _update_breadcrumb(self):
+        # alte Pfad-Buttons entfernen
+        while self.bc_layout.count() > 2:
+            w = self.bc_layout.takeAt(2).widget()
+            w.deleteLater()
+
+        # neue Pfad-Buttons erzeugen
+        for depth, pid in enumerate(self.nav_stack):
+            label = next(b["label"] for b in self.cfg_buttons if b["id"] == pid)
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda _=None, d=depth: self._jump_depth(d))
+            self.bc_layout.addWidget(btn)
+
+        self.btn_up.setEnabled(bool(self.nav_stack))
+
+    # ----------------------------------------------------------
+    # Button-Handler
+    # ----------------------------------------------------------
+    def _on_button_click(self, cfg: dict):
+        act = cfg["action"]
+        if act == "MENU":
+            self.nav_stack.append(cfg["id"])
+            self.pages.setCurrentIndex(self.page_for_id[cfg["id"]])
+            self._update_breadcrumb()
+            self._update_pagination()
+            return
 
         try:
-            if action == "SCRIPT":
-                self.run_script(payload)
+            if act == "SCRIPT":
+                subprocess.Popen([sys.executable, cfg["payload"]])
+            elif act == "LINK":
+                QDesktopServices.openUrl(QUrl(cfg["payload"]))
+            elif act == "FILE":
+                QDesktopServices.openUrl(QUrl.fromLocalFile(cfg["payload"]))
+            elif act == "EXPLORER":
+                subprocess.Popen(["explorer", cfg["payload"]])
+        except Exception as exc:
+            QMessageBox.critical(self, "Fehler", str(exc))
 
-            elif action == "LINK":
-                QDesktopServices.openUrl(QUrl(payload))
+    # ---------- Breadcrumb-Buttons ----------
+    def _go_home(self):
+        self.nav_stack.clear()
+        self.pages.setCurrentIndex(0)
+        self._update_breadcrumb()
+        self._update_pagination()
 
-            elif action == "EXPLORER":
-                path = Path(payload)
-                if not path.exists():
-                    raise FileNotFoundError(f"Pfad '{payload}' nicht gefunden.")
-                if sys.platform.startswith("win"):
-                    subprocess.Popen(["explorer", str(path)])
-                else:
-                    subprocess.Popen(["xdg-open", str(path)])
+    def _go_up(self):
+        if self.nav_stack:
+            self.nav_stack.pop()
+            target = 0 if not self.nav_stack else self.page_for_id[self.nav_stack[-1]]
+            self.pages.setCurrentIndex(target)
+            self._update_breadcrumb()
+            self._update_pagination()
 
-            elif action == "FILE":
-                file = Path(payload)
-                if not file.is_file():
-                    raise FileNotFoundError(f"Datei '{payload}' nicht gefunden.")
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(file)))
+    def _jump_depth(self, depth: int):
+        self.nav_stack = self.nav_stack[:depth + 1]
+        target = self.page_for_id[self.nav_stack[-1]]
+        self.pages.setCurrentIndex(target)
+        self._update_breadcrumb()
+        self._update_pagination()
 
-            elif action == "GROUP":
-                target = int(payload)
-                self.pages.setCurrentIndex(target - 1)
+    # ---------- Pfeil-Navigation ----------
+    def _level_bounds(self) -> Tuple[int, int]:
+        """liefert (erste, letzte) Page-Index der aktuellen Ebene"""
+        first = 0 if not self.nav_stack else self.page_for_id[self.nav_stack[-1]]
+        btns = self.children[self.nav_stack[-1] if self.nav_stack else None]
+        pages = (len(btns) - 1) // MAX_PER_PAGE + 1
+        return first, first + pages - 1
 
-            else:
-                raise ValueError(f"Aktions-Typ '{action}' nicht implementiert.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Fehler bei Aktion", str(e))
-
-    def run_script(self, script_path: str):
-        """
-        Führt ein externes Python-Skript im eigenen Interpreter aus.
-        """
-        script = Path(script_path)
-        if not script.is_file():
-            raise FileNotFoundError(f"Skript '{script_path}' nicht gefunden.")
-        subprocess.Popen([sys.executable, str(script)], cwd=str(script.parent))
-
-    def _label_text(self) -> str:
-        """Hilfsfunktion für das Seiten-Label (Seite X / Y)."""
-        return f"Seite {self.pages.currentIndex() + 1} / {self.pages.count()}"
-
-    def on_page_changed(self, index: int):
-        """Aktualisiert Label und Paginierungs-Buttons bei Seitenwechsel."""
-        self.page_label.setText(self._label_text())
-        self.update_buttons()
-
-    def update_buttons(self):
-        """Aktiviert/Deaktiviert die Vor-/Nächste-Buttons."""
+    def _go_prev(self):
+        first, _ = self._level_bounds()
         idx = self.pages.currentIndex()
-        cnt = self.pages.count()
-        self.prev_btn.setEnabled(idx > 0)
-        self.next_btn.setEnabled(idx < cnt - 1)
-
-    def go_previous(self):
-        """Wechselt zur vorherigen Seite."""
-        idx = self.pages.currentIndex()
-        if idx > 0:
+        if idx > first:
             self.pages.setCurrentIndex(idx - 1)
 
-    def go_next(self):
-        """Wechselt zur nächsten Seite."""
+    def _go_next(self):
+        _, last = self._level_bounds()
         idx = self.pages.currentIndex()
-        if idx < self.pages.count() - 1:
+        if idx < last:
             self.pages.setCurrentIndex(idx + 1)
+
+    def _page_changed(self, _):
+        self._update_pagination()
+
+    def _update_pagination(self):
+        first, last = self._level_bounds()
+        idx = self.pages.currentIndex()
+        self.prev_btn.setEnabled(idx > first)
+        self.next_btn.setEnabled(idx < last)
+        self.page_lbl.setText(f"Seite {idx + 1} / {self.pages.count()}")
