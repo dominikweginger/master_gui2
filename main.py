@@ -18,7 +18,7 @@ def main():
     app = QApplication(sys.argv)
 
     # 3) Hauptfenster erzeugen und anzeigen
-    window = MasterWindow()
+    window = MasterWindow(config)
     window.show()
 
     # 4) Event-Loop starten
