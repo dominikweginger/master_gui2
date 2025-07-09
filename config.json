@@ -1,0 +1,24 @@
+{
+    "buttons": [
+        {
+            "id": "btn1",
+            "label": "Run Script",
+            "action": "SCRIPT",
+            "payload": "scripts/example.py",
+            "icon": "assets/icons/script.png",
+            "size": [
+                64,
+                64
+            ],
+            "position": [
+                0,
+                0
+            ],
+            "page": 1
+        }
+    ],
+    "theme": {
+        "stylesheet": "test.qss",
+        "background": "assets/backgrounds/default.png"
+    }
+}
