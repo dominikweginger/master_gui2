@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-GUI-Hauptfenster – Version 2025-07-09
+GUI-Hauptfenster – Version 2025-07-09 (mit Task-Dashboard & ScriptRunner-Integration)
 * 5×6-Raster (30 Buttons) pro Seite
 * beliebige Hierarchietiefe über parent-Feld
-* Breadcrumb mit  🏠  und  ⬅  Buttons
+* Breadcrumb mit 🏠 und ⬅ Buttons
+* SCRIPT-Action läuft asynchron im QThreadPool, Dashboard überwacht Jobs
 """
 
 import sys, subprocess
@@ -11,12 +12,19 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Tuple, List, Dict
 
+from uuid import uuid4
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QGridLayout, QMessageBox, QFrame
 )
 from PySide6.QtGui import QIcon, QDesktopServices
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QUrl, QThreadPool
+
+# Neue Importe für Task-Dashboard & Runner
+from core.dispatcher import dispatcher
+from core.runner import run_script_async
+from ui.task_dashboard import TaskDashboard
 
 GRID_ROWS, GRID_COLS = 5, 6
 MAX_PER_PAGE = GRID_ROWS * GRID_COLS
@@ -37,10 +45,17 @@ class MasterWindow(QMainWindow):
 
         # --- Widgets ---------------------------------------------------------
         self.pages          = QStackedWidget()
-        self.page_for_id    = {}      # parent-ID  → erste Seite seiner Children
+        self.page_for_id    = {}      # parent-ID → erste Seite seiner Children
         self.nav_stack      = []      # Verlauf von parent-IDs (für Breadcrumb)
 
         self._build_pages()           # alle Seiten erzeugen
+
+        # --- Dashboard-Instanz (non-modal Widget) ---------------------------
+        self.dashboard = TaskDashboard(self)
+        # Menü-Eintrag zum Öffnen
+        menubar = self.menuBar()
+        act_dash = menubar.addAction("Task-Dashboard")
+        act_dash.triggered.connect(self.dashboard.show)
 
         central     = QWidget()
         main_layout = QVBoxLayout(central)
@@ -79,7 +94,7 @@ class MasterWindow(QMainWindow):
         self._update_pagination()
 
     # ----------------------------------------------------------
-    # Seitenerzeugung
+    # Seitenerzeugung (unverändert)
     # ----------------------------------------------------------
     def _new_grid_page(self) -> Tuple[QWidget, QGridLayout]:
         container = QWidget()
@@ -106,26 +121,22 @@ class MasterWindow(QMainWindow):
                 pages.append(container)
             self._add_cfg_button(grid, cfg)
 
-        return pages  # Liste der Container-Widgets
+        return pages
 
     def _build_pages(self):
-        # 1) Root-Seiten (parent = None)
+        # Root-Seiten (parent=None)
         root_pages = self._paginate_buttons(self.children[None])
-
-        # 2) Child-Seiten für jeden MENU-Knopf
+        # Child-Seiten (Breitensuche über alle Ebenen)
         for parent_cfg in self.children[None]:
             if parent_cfg["action"] != "MENU":
                 continue
             pages = self._paginate_buttons(self.children[parent_cfg["id"]])
             if pages:
                 self.page_for_id[parent_cfg["id"]] = self.pages.indexOf(pages[0])
-
-        # 3) Rekursion für tiefere Ebenen
-        stack = list(self.children[None])  # shallow copy
+        stack = list(self.children[None])
         while stack:
             parent = stack.pop()
-            childs = self.children[parent["id"]]
-            for c in childs:
+            for c in self.children[parent["id"]]:
                 if c["action"] == "MENU":
                     pages = self._paginate_buttons(self.children[c["id"]])
                     if pages:
@@ -133,25 +144,21 @@ class MasterWindow(QMainWindow):
                     stack.append(c)
 
     # ----------------------------------------------------------
-    # Breadcrumb
+    # Breadcrumb-Update (unverändert)
     # ----------------------------------------------------------
     def _update_breadcrumb(self):
-        # alte Pfad-Buttons entfernen
         while self.bc_layout.count() > 2:
             w = self.bc_layout.takeAt(2).widget()
             w.deleteLater()
-
-        # neue Pfad-Buttons erzeugen
         for depth, pid in enumerate(self.nav_stack):
             label = next(b["label"] for b in self.cfg_buttons if b["id"] == pid)
             btn = QPushButton(label)
             btn.clicked.connect(lambda _=None, d=depth: self._jump_depth(d))
             self.bc_layout.addWidget(btn)
-
         self.btn_up.setEnabled(bool(self.nav_stack))
 
     # ----------------------------------------------------------
-    # Button-Handler
+    # Button-Handler mit asynchronem SCRIPT-Start
     # ----------------------------------------------------------
     def _on_button_click(self, cfg: dict):
         act = cfg["action"]
@@ -164,17 +171,26 @@ class MasterWindow(QMainWindow):
 
         try:
             if act == "SCRIPT":
-                subprocess.Popen([sys.executable, cfg["payload"]])
+                # asynchron im QThreadPool starten
+                script_path = Path(cfg["payload"]).resolve()
+                if not script_path.exists():
+                    QMessageBox.critical(self, "Fehler", f"Skript nicht gefunden:\n{script_path}")
+                    return
+                run_script_async(script_path)
+
             elif act == "LINK":
                 QDesktopServices.openUrl(QUrl(cfg["payload"]))
+
             elif act == "FILE":
                 QDesktopServices.openUrl(QUrl.fromLocalFile(cfg["payload"]))
+
             elif act == "EXPLORER":
                 subprocess.Popen(["explorer", cfg["payload"]])
+
         except Exception as exc:
             QMessageBox.critical(self, "Fehler", str(exc))
 
-    # ---------- Breadcrumb-Buttons ----------
+    # ---------- Breadcrumb-Buttons & Navigation (unverändert) ----------
     def _go_home(self):
         self.nav_stack.clear()
         self.pages.setCurrentIndex(0)
@@ -196,9 +212,8 @@ class MasterWindow(QMainWindow):
         self._update_breadcrumb()
         self._update_pagination()
 
-    # ---------- Pfeil-Navigation ----------
+    # ---------- Pfeil-Navigation (unverändert) ----------
     def _level_bounds(self) -> Tuple[int, int]:
-        """liefert (erste, letzte) Page-Index der aktuellen Ebene"""
         first = 0 if not self.nav_stack else self.page_for_id[self.nav_stack[-1]]
         btns = self.children[self.nav_stack[-1] if self.nav_stack else None]
         pages = (len(btns) - 1) // MAX_PER_PAGE + 1
