@@ -1,27 +1,32 @@
+#!/usr/bin/env python3
+"""
+core.models
+===========
+
+Einfaches Domain-Model für Buttons, damit wir Typhints
+nutzen können, ohne PySide-Klassen durchs Projekt zu reichen.
+"""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 class ButtonAction(Enum):
     SCRIPT   = "SCRIPT"
     LINK     = "LINK"
-    FILE     = "FILE"
-    EXPLORER = "EXPLORER"
-    MENU     = "MENU"        # ← NEU: öffnet Unterseite
+    FILE     = "FILE"          # inkl. .exe-Dateien
+    FOLDER   = "FOLDER"
+    MENU     = "MENU"          # Container für Children
 
 
 @dataclass
 class ButtonModel:
-    """
-    Datenklasse für einen GUI-Button.
-    """
-    id: str
-    label: str
-    action: ButtonAction
-    icon: Path
-    payload: str = ""
-    parent_id: Optional[str] = None        # ← NEU
-    size: Tuple[int, int] = (64, 64)
-    position: Tuple[int, int] = (0, 0)     # wird zur Laufzeit gesetzt
+    id:          str
+    action:      ButtonAction
+    payload:     str | None
+    icon:        str
+    parent:      str | None
+    description: str = ""
+    position:    Tuple[int, int] | None = None      # (row, col)
