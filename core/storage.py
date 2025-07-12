@@ -36,6 +36,9 @@ SCHEMA = {
             },
             "required": ["stylesheet", "background"],
             "additionalProperties": False
+        },
+        "window_title": {               # neu: Fenstertitel erlaubt
+            "type": "string"
         }
     },
     "required": ["buttons", "theme"],
@@ -45,7 +48,7 @@ SCHEMA = {
             "type": "object",
             "properties": {
                 "id":          {"type": "string"},
-                "label":       {"type": "string"},      # = id (Altlast)
+                "label":       {"type": "string"},
                 "action": {
                     "type": "string",
                     "enum": ["SCRIPT", "LINK", "FILE", "FOLDER", "MENU"]

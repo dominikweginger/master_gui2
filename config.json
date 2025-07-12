@@ -109,10 +109,20 @@
       "icon": "assets\\icons\\placeholder.png",
       "parent": "main 2",
       "description": ""
+    },
+    {
+      "id": "neu neu",
+      "label": "neu neu",
+      "action": "SCRIPT",
+      "payload": "",
+      "icon": "assets\\icons\\placeholder.png",
+      "parent": null,
+      "description": ""
     }
   ],
   "theme": {
     "stylesheet": "assets/styles/default.qss",
-    "background": "assets/backgrounds/default.png"
-  }
+    "background": "C:\\Users\\dwegi\\Downloads\\ChatGPT Image 12. Juli 2025, 08_40_43.png"
+  },
+  "window_title": "Master GUI"
 }
