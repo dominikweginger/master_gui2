@@ -65,18 +65,7 @@ class ButtonManager(QDialog):
         vbox = QVBoxLayout(self)
         vbox.addWidget(self.tree)
         vbox.addLayout(hbox)
-        vbox.addWidget(QLabel("Positions-Vorschau der aktuellen Ebene:"))
-        # Rahmen und GridContainer
-        self._preview_frame  = QFrame(self)
-        self._preview_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Plain)
-        self._preview_layout = QGridLayout(self._preview_frame)
-        self._preview_layout.setSpacing(4)
-        vbox.addWidget(self._preview_frame)
-        # Dynamisch aktualisieren, wenn Auswahl im Baum wechselt
-        self.tree.itemSelectionChanged.connect(self._update_preview)
-        # erste Befüllung
-        self._update_preview()
-
+        
     # -------------------------------------------------------------------------
     def _reload_tree(self):
         self.tree.clear()
