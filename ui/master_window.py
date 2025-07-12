@@ -2,90 +2,95 @@
 """
 ui.master_window
 ================
-Hauptfenster der Anwendung.  Zeigt Buttons aus *config.json*,
-öffnet Task-Dashboard, den Button-Manager **und** besitzt jetzt eine
-Navigation-Toolbar mit
-
-* **← Zurück** – springt exakt **eine** Ebene höher
-* **⏭ Start**   – springt direkt zur Root-Ebene
-
-Alle bisherigen Features bleiben unverändert.
+Hauptfenster der Anwendung. Zeigt Buttons aus *config.json*,
+öffnet Task-Dashboard, den Button-Manager und besitzt eine
+Toolbar für Menü-Navigation sowie eine statische Pagination
+mit Prev/Next und Seitenanzeige unten.
 """
 from __future__ import annotations
 
-import subprocess
-import sys
+import subprocess, sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from PySide6.QtCore import Qt, QSize, QUrl
-from PySide6.QtGui  import (
-    QAction,
-    QDesktopServices,
-    QIcon,
-    QKeySequence,
-)
+from PySide6.QtGui  import QAction, QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
-    QLabel,
-    QMainWindow,
-    QPushButton,
-    QStackedWidget,
-    QVBoxLayout,
-    QWidget,
-    QGridLayout,
+    QLabel, QMainWindow, QPushButton, QStackedWidget,
+    QVBoxLayout, QHBoxLayout, QWidget, QGridLayout
 )
 
 from core import storage
 from ui.task_dashboard import TaskDashboard
 from ui.button_manager import ButtonManager
 
-# -----------------------------------------------------------------------------
-GRID_ROWS      = 5
-GRID_COLS      = 6
-MAX_PER_PAGE   = GRID_ROWS * GRID_COLS
+# -------------------------------------------------------------------
+GRID_ROWS    = 5
+GRID_COLS    = 6
+MAX_PER_PAGE = GRID_ROWS * GRID_COLS  # 30 Buttons pro Seite
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
 class MasterWindow(QMainWindow):
-    """Zentrales Hauptfenster der Master-GUI."""
-
-    # ---------------------------------------------------------------------
-    #   Initialisierung
-    # ---------------------------------------------------------------------
+    """Zentrales Hauptfenster der Master-GUI mit statischer Pagination."""
     def __init__(self, config: dict, cfg_path: Path | str = Path("config.json")):
         super().__init__()
         self.setWindowTitle("Master GUI")
 
-        # ---------------- Persistente Config -----------------------------
+        # Persistente Config
         self.cfg      = config
         self.cfg_path = Path(cfg_path)
 
-        # ---------------- Navigation / Seiten ----------------------------
-        self.pages:       QStackedWidget        = QStackedWidget()
-        self.page_for_id: Dict[str | None, QWidget] = {}
-        self.nav_stack:   List[str | None]      = [None]           # Root-Ebene
+        # Pagination-Datenstrukturen
+        # pro parent_id: Liste von Seiten-Widgets und der aktuelle Index
+        self.pages_for_parent: Dict[str|None, List[QWidget]] = {}
+        self.current_page_idx: Dict[str|None, int] = {}
 
-        # ---------------- Zentrales Layout -------------------------------
+        # QStackedWidget für alle Seiten aller Ebenen
+        self.pages: QStackedWidget = QStackedWidget()
+        # Mapping (parent_id, page_idx) → Widget im Stack
+        self.page_for_id: Dict[Tuple[str|None,int], QWidget] = {}
+        # Navigation-Stack der Menüebenen (root = None)
+        self.nav_stack: List[str|None]       = [None]
+
+        # Layout-Aufbau
         central = QWidget()
         vbox    = QVBoxLayout(central)
         vbox.addWidget(self.pages)
+
+        # === Pagination-Controls unten ===
+        self.prev_btn   = QPushButton("‹‹ Prev")
+        self.next_btn   = QPushButton("Next ››")
+        self.page_label = QLabel()
+        self.prev_btn.clicked.connect(self._on_prev_clicked)
+        self.next_btn.clicked.connect(self._on_next_clicked)
+
+        nav_widget = QWidget()
+        nav_layout = QHBoxLayout(nav_widget)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.prev_btn)
+        nav_layout.addWidget(self.page_label)
+        nav_layout.addWidget(self.next_btn)
+        nav_layout.addStretch()
+
+        vbox.addWidget(nav_widget)
+        # === Ende Pagination-Controls ===
+
+        # Breadcrumb oberhalb
         self._breadcrumb = QLabel()
         vbox.addWidget(self._breadcrumb)
+
         self.setCentralWidget(central)
 
-        # ---------------- Task-Dashboard -------------------------------
+        # Task-Dashboard & Menü-Toolbar (unverändert)
         self.dashboard = TaskDashboard(self)
-
-        # ---------------- Menü-Bar & Toolbar -----------------------------
         self._init_menu_and_toolbar()
 
-        # ---------------- Erste Seiten erzeugen --------------------------
+        # Erste Seiten erzeugen und anzeigen
         self._rebuild_pages()
 
-    # ------------------------------------------------------------------
-    #   Toolbar-Helfer
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
     def _init_menu_and_toolbar(self) -> None:
-        """Erstellt Menü-Einträge und die Navigation-Toolbar."""
+        """Menü- und Toolbar-Einträge (bleiben unverändert)."""
         menu = self.menuBar()
         menu.addAction("Task-Dashboard", self.dashboard.show)
         menu.addAction("Button-Manager", self._open_manager)
@@ -93,107 +98,133 @@ class MasterWindow(QMainWindow):
         nav_tb = self.addToolBar("Navigation")
         nav_tb.setMovable(False)
 
-        # -- Eine Ebene zurück
         self.act_back = QAction("← Zurück", self)
         self.act_back.setShortcut(QKeySequence(Qt.Key_Backspace))
-        self.act_back.setEnabled(False)                  # in Root deaktiviert
+        self.act_back.setEnabled(False)
         self.act_back.triggered.connect(self._go_back)
         nav_tb.addAction(self.act_back)
 
-        # -- Direkt zum Start
         self.act_home = QAction("⏭ Start", self)
         self.act_home.setShortcut(QKeySequence(Qt.Key_Home))
         self.act_home.triggered.connect(self._go_home)
         nav_tb.addAction(self.act_home)
 
-    # ------------------------------------------------------------------
-    #   Daten-Helfer
-    # ------------------------------------------------------------------
-    def _children_of(self, parent_id: str | None):
-        """Liefert alle Buttons, deren *parent* gleich *parent_id* ist."""
+    # -----------------------------------------------------------------
+    def _children_of(self, parent_id: str|None):
+        """Alle Buttons in config, deren parent == parent_id."""
         return [b for b in self.cfg["buttons"] if b["parent"] == parent_id]
 
-    # ------------------------------------------------------------------
-    #   Seiten neu aufbauen
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
     def _rebuild_pages(self) -> None:
-        """Leert den QStackedWidget und baut alle MENU-Seiten neu auf."""
-        # Reset Navigation
+        """
+        Baut für jedes Menü-Level (parent_id) statisch so viele
+        Seiten à MAX_PER_PAGE Buttons, wie benötigt.
+        """
+        # Reset der Navigation und alten Seiten
         self.nav_stack = [None]
+        self.pages_for_parent.clear()
+        self.page_for_id.clear()
 
-        # Vorhandene Widgets entsorgen
+        # Alle Widgets im Stack entfernen
         while self.pages.count():
             w = self.pages.widget(0)
             self.pages.removeWidget(w)
             w.deleteLater()
-        self.page_for_id.clear()
 
-        # --- Helper ----------------------------------------------------
-        def build_page(parent_id: str | None) -> QWidget:
-            page  = QWidget()
-            grid  = QGridLayout(page)
-            self.page_for_id[parent_id] = page
-
+        # Hilfsfunktion: Seiten-Widget for parent_id erzeugen
+        def make_pages_for(parent_id: str|None) -> List[QWidget]:
             children = self._children_of(parent_id)
-            # Sortiert: erst Buttons mit Position, dann Rest
+            # sortiere nach position (row,col) oder an Enden
             children.sort(key=lambda b: (
-                b.get("position", {}).get("row", 99),
-                b.get("position", {}).get("col", 99),
+                b.get("position",{}).get("row", MAX_PER_PAGE),
+                b.get("position",{}).get("col", MAX_PER_PAGE),
             ))
+            pages: List[QWidget] = []
+            # Chunking in MAX_PER_PAGE
+            for i in range(0, len(children), MAX_PER_PAGE):
+                chunk = children[i:i+MAX_PER_PAGE]
+                page  = QWidget()
+                grid  = QGridLayout(page)
+                for idx, cfg_btn in enumerate(chunk):
+                    # feste Grid-Position oder automatisch zeilenweise
+                    if "position" in cfg_btn:
+                        r = cfg_btn["position"]["row"]
+                        c = cfg_btn["position"]["col"]
+                    else:
+                        r, c = divmod(idx, GRID_COLS)
+                    btn = QPushButton(cfg_btn["id"])
+                    # Icon & Tooltip wie bisher
+                    if ico := cfg_btn.get("icon"):
+                        icon = QIcon(ico)
+                        btn.setIcon(icon)
+                        sz  = icon.availableSizes()
+                        btn.setIconSize(sz[0] if sz else QSize(64,64))
+                    if desc := cfg_btn.get("description"):
+                        btn.setToolTip(desc)
+                    btn.clicked.connect(lambda _, b=cfg_btn: self._on_click(b))
+                    grid.addWidget(btn, r, c)
+                pages.append(page)
+            return pages
 
-            for cfg_btn in children:
-                # ---- Position ------------------------------------------------
-                if "position" in cfg_btn:
-                    r = cfg_btn["position"]["row"]
-                    c = cfg_btn["position"]["col"]
-                else:
-                    idx = grid.count()
-                    r, c = divmod(idx, GRID_COLS)
+        # Erzeuge Seiten für Root + alle MENU-Buttons
+        all_parents = [None] + [b["id"] for b in self.cfg["buttons"] if b["action"]=="MENU"]
+        for pid in all_parents:
+            page_list = make_pages_for(pid)
+            self.pages_for_parent[pid]   = page_list
+            self.current_page_idx[pid]   = 0
+            for idx, pg in enumerate(page_list):
+                self.page_for_id[(pid, idx)] = pg
+                self.pages.addWidget(pg)
 
-                # ---- Button anlegen ----------------------------------------
-                btn = QPushButton(cfg_btn["id"])
-                if (ico := cfg_btn.get("icon")):
-                    icon = QIcon(ico)
-                    btn.setIcon(icon)
-                    sizes = icon.availableSizes()
-                    btn.setIconSize(sizes[0] if sizes else QSize(64, 64))
-
-                if cfg_btn.get("description"):
-                    btn.setToolTip(cfg_btn["description"])
-
-                btn.clicked.connect(lambda _, b=cfg_btn: self._on_click(b))
-                grid.addWidget(btn, r, c)
-            return page
-
-        # Root + alle MENU-Seiten bauen *und* in den Stack hängen
-        root_page = build_page(None)
-        self.pages.addWidget(root_page)
-
-        for cfg_btn in self.cfg["buttons"]:
-            if cfg_btn["action"] == "MENU":
-                menu_page = build_page(cfg_btn["id"])
-                self.pages.addWidget(menu_page)
-
-        # UI-State -------------------------------------------------------
-        self.pages.setCurrentWidget(root_page)
+        # Zeige Root-Seite 0 an
+        self.pages.setCurrentWidget(self.page_for_id[(None, 0)])
         self.act_back.setEnabled(False)
         self._update_breadcrumb()
+        self._update_pagination_controls()
 
-    # ------------------------------------------------------------------
-    #   Klick-Handler
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
+    def _update_pagination_controls(self) -> None:
+        """Aktiviere/deaktiviere Prev/Next und aktualisiere das Label."""
+        pid   = self.nav_stack[-1]
+        idx   = self.current_page_idx[pid]
+        total = len(self.pages_for_parent[pid])
+        self.prev_btn.setEnabled(idx > 0)
+        self.next_btn.setEnabled(idx < total - 1)
+        self.page_label.setText(f"Seite {idx+1} von {total}")
+
+    # -----------------------------------------------------------------
+    def _on_prev_clicked(self) -> None:
+        pid = self.nav_stack[-1]
+        idx = self.current_page_idx[pid]
+        if idx > 0:
+            self.current_page_idx[pid] -= 1
+            self.pages.setCurrentWidget(self.page_for_id[(pid, idx-1)])
+            self._update_pagination_controls()
+
+    # -----------------------------------------------------------------
+    def _on_next_clicked(self) -> None:
+        pid = self.nav_stack[-1]
+        idx = self.current_page_idx[pid]
+        if idx < len(self.pages_for_parent[pid]) - 1:
+            self.current_page_idx[pid] += 1
+            self.pages.setCurrentWidget(self.page_for_id[(pid, idx+1)])
+            self._update_pagination_controls()
+
+    # -----------------------------------------------------------------
     def _on_click(self, cfg: dict) -> None:
+        """Verarbeitet Klick auf einen Button je nach Aktionstyp."""
         act = cfg["action"]
-
-        # -------- Navigation -------------------------------------------
         if act == "MENU":
+            # neues Level: Seite stets 0
             self.nav_stack.append(cfg["id"])
-            self.pages.setCurrentWidget(self.page_for_id[cfg["id"]])
+            self.current_page_idx[cfg["id"]] = 0
+            self.pages.setCurrentWidget(self.page_for_id[(cfg["id"], 0)])
             self._update_breadcrumb()
             self.act_back.setEnabled(True)
+            self._update_pagination_controls()
             return
 
-        # -------- Aktionen ausführen -----------------------------------
+        # Alle anderen Aktionstypen unverändert:
         if act == "SCRIPT":
             subprocess.Popen([sys.executable, cfg["payload"]])
         elif act == "FILE":
@@ -203,33 +234,37 @@ class MasterWindow(QMainWindow):
         elif act == "FOLDER":
             subprocess.Popen(f'explorer "{cfg["payload"]}"')
 
-    # ------------------------------------------------------------------
-    #   Toolbar-Slots
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
     def _go_back(self) -> None:
         if len(self.nav_stack) <= 1:
-            return  # schon Root
+            return
         self.nav_stack.pop()
-        prev_id = self.nav_stack[-1]
-        self.pages.setCurrentWidget(self.page_for_id[prev_id])
+        pid = self.nav_stack[-1]
+        # Seite immer wieder 0
+        self.current_page_idx[pid] = 0
+        self.pages.setCurrentWidget(self.page_for_id[(pid, 0)])
         self._update_breadcrumb()
         self.act_back.setEnabled(len(self.nav_stack) > 1)
+        self._update_pagination_controls()
 
+    # -----------------------------------------------------------------
     def _go_home(self) -> None:
         self.nav_stack = [None]
-        self.pages.setCurrentWidget(self.page_for_id[None])
+        self.current_page_idx[None] = 0
+        self.pages.setCurrentWidget(self.page_for_id[(None, 0)])
         self._update_breadcrumb()
         self.act_back.setEnabled(False)
+        self._update_pagination_controls()
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
     def _update_breadcrumb(self) -> None:
+        """Aktualisiert die Breadcrumb-Anzeige oberhalb."""
         crumbs = ["Start"] + self.nav_stack[1:]
         self._breadcrumb.setText(" / ".join(crumbs))
 
-    # ------------------------------------------------------------------
-    #   Button-Manager
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
     def _open_manager(self) -> None:
+        """Öffnet den Button-Manager; bei OK: Config speichern und Seiten neu bauen."""
         dlg = ButtonManager(self.cfg, self.cfg_path, self)
         if dlg.exec():
             storage.save_config(self.cfg_path, self.cfg)
