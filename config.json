@@ -1,118 +1,8 @@
 {
   "buttons": [
     {
-      "id": "Test Button",
-      "label": "Test Button",
-      "action": "SCRIPT",
-      "payload": "C:\\Users\\dwegi\\Desktop\\Python Projekte\\Avci\\gui.py",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": null,
-      "description": "Test Verlinkung",
-      "position": {
-        "row": 3,
-        "col": 2
-      }
-    },
-    {
-      "id": "Hallo du test",
-      "label": "Hallo du test",
-      "action": "SCRIPT",
-      "payload": "C:\\Users\\dwegi\\Desktop\\testfile.py",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": null,
-      "description": "",
-      "position": {
-        "row": 1,
-        "col": 1
-      }
-    },
-    {
-      "id": "main1",
-      "label": "main1",
-      "action": "MENU",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": null,
-      "description": ""
-    },
-    {
-      "id": "child3",
-      "label": "child3",
-      "action": "SCRIPT",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": "main1",
-      "description": "",
-      "position": {
-        "row": 0,
-        "col": 2
-      }
-    },
-    {
-      "id": "child 1",
-      "label": "child 1",
-      "action": "SCRIPT",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": "main1",
-      "description": "",
-      "position": {
-        "row": 0,
-        "col": 0
-      }
-    },
-    {
-      "id": "child 2",
-      "label": "child 2",
-      "action": "SCRIPT",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": "main1",
-      "description": "",
-      "position": {
-        "row": 1,
-        "col": 1
-      }
-    },
-    {
-      "id": "main 2",
-      "label": "main 2",
-      "action": "MENU",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": null,
-      "description": ""
-    },
-    {
-      "id": "c1",
-      "label": "c1",
-      "action": "SCRIPT",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": "main 2",
-      "description": ""
-    },
-    {
-      "id": "c2",
-      "label": "c2",
-      "action": "SCRIPT",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": "main 2",
-      "description": ""
-    },
-    {
-      "id": "c3",
-      "label": "c3",
-      "action": "SCRIPT",
-      "payload": "",
-      "icon": "assets\\icons\\placeholder.png",
-      "parent": "main 2",
-      "description": ""
-    },
-    {
-      "id": "neu neu",
-      "label": "neu neu",
+      "id": "test 1",
+      "label": "test 1",
       "action": "SCRIPT",
       "payload": "",
       "icon": "assets\\icons\\placeholder.png",
@@ -122,7 +12,7 @@
   ],
   "theme": {
     "stylesheet": "assets/styles/default.qss",
-    "background": "C:\\Users\\dwegi\\Downloads\\ChatGPT Image 12. Juli 2025, 08_40_43.png"
+    "background": ""
   },
   "window_title": "Master GUI"
 }

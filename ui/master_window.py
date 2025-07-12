@@ -173,6 +173,15 @@ class MasterWindow(QMainWindow):
                 self.page_for_id[(pid, idx)] = pg
                 self.pages.addWidget(pg)
 
+        # --- Fallback: Leere Startseite anlegen, wenn keine Buttons vorhanden sind ---
+        if (None, 0) not in self.page_for_id:
+            empty_page = QWidget()
+            self.page_for_id[(None, 0)] = empty_page
+            self.pages.addWidget(empty_page)
+            self.pages_for_parent[None] = [empty_page]
+            self.current_page_idx[None] = 0
+
+
         self.pages.setCurrentWidget(self.page_for_id[(None, 0)])
         self.act_back.setEnabled(False)
         self._update_breadcrumb()
