@@ -3,8 +3,8 @@
     {
       "id": "test 1",
       "label": "test 1",
-      "action": "SCRIPT",
-      "payload": "",
+      "action": "FOLDER",
+      "payload": "gui_tools",
       "icon": "assets\\icons\\placeholder.png",
       "parent": null,
       "description": ""

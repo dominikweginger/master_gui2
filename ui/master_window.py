@@ -6,9 +6,14 @@ Hauptfenster der Anwendung. Zeigt Buttons aus *config.json*,
 öffnet Task-Dashboard, den Button-Manager und besitzt eine
 Toolbar für Menü-Navigation sowie eine statische Pagination
 mit Prev/Next und Seitenanzeige unten.
+
+NEU (Patch B):
+- payloads werden vor der Ausführung in absolute Pfade aufgelöst (to_absolute)
+- SCRIPT-Start: im EXE-Modus (sys.frozen) via os.startfile, sonst via Python-Interpreter
 """
 from __future__ import annotations
 
+import os
 import subprocess, sys
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -23,6 +28,7 @@ from PySide6.QtWidgets import (
 from core import storage
 from ui.task_dashboard import TaskDashboard
 from ui.button_manager import ButtonManager
+from util.paths import to_absolute  # NEU
 
 # -------------------------------------------------------------------
 GRID_ROWS    = 5
@@ -181,7 +187,6 @@ class MasterWindow(QMainWindow):
             self.pages_for_parent[None] = [empty_page]
             self.current_page_idx[None] = 0
 
-
         self.pages.setCurrentWidget(self.page_for_id[(None, 0)])
         self.act_back.setEnabled(False)
         self._update_breadcrumb()
@@ -217,6 +222,7 @@ class MasterWindow(QMainWindow):
     # -----------------------------------------------------------------
     def _on_click(self, cfg: dict) -> None:
         act = cfg["action"]
+
         if act == "MENU":
             self.nav_stack.append(cfg["id"])
             self.current_page_idx[cfg["id"]] = 0
@@ -226,14 +232,34 @@ class MasterWindow(QMainWindow):
             self._update_pagination_controls()
             return
 
+        # --- NEU: payload immer absolut auflösen ---
+        payload = cfg.get("payload") or ""
+        payload_abs = str(to_absolute(payload)) if payload else ""
+
         if act == "SCRIPT":
-            subprocess.Popen([sys.executable, cfg["payload"]])
+            # Dev: über Python-Interpreter; EXE: über Dateiverknüpfung (py.exe/pythonw)
+            if getattr(sys, "frozen", False):
+                try:
+                    os.startfile(payload_abs)  # Windows: startet .py mit verknüpfter Python-Installation
+                except OSError:
+                    # Fallback: py-Launcher versuchen (falls vorhanden)
+                    subprocess.Popen(["py", "-3", payload_abs], shell=False)
+            else:
+                subprocess.Popen([sys.executable, payload_abs], shell=False)
+
         elif act == "FILE":
-            subprocess.Popen(cfg["payload"], shell=True)
+            # Datei im Standardprogramm öffnen
+            if sys.platform.startswith("win"):
+                os.startfile(payload_abs)
+            else:
+                subprocess.Popen([payload_abs], shell=False)
+
         elif act == "LINK":
             QDesktopServices.openUrl(QUrl(cfg["payload"]))
+
         elif act == "FOLDER":
-            subprocess.Popen(f'explorer "{cfg["payload"]}"')
+            # Explorer mit absolutem Pfad
+            subprocess.Popen(f'explorer "{payload_abs}"')
 
     # -----------------------------------------------------------------
     def _go_back(self) -> None:

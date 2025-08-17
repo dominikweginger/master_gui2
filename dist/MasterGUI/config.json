@@ -1,0 +1,8 @@
+{
+  "buttons": [],
+  "theme": {
+    "stylesheet": "assets/styles/default.qss",
+    "background": ""
+  },
+  "window_title": "Master GUI"
+}
